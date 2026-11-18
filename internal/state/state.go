@@ -30,9 +30,10 @@ type Track struct {
 }
 
 type State struct {
-	Version  int               `json:"version"`
-	LastSync int64             `json:"last_sync"`
-	Tracks   map[string]*Track `json:"tracks"`
+	Version   int               `json:"version"`
+	LastSync  int64             `json:"last_sync"`
+	DBPending bool              `json:"db_pending"`
+	Tracks    map[string]*Track `json:"tracks"`
 }
 
 func statePath(mount string) string {

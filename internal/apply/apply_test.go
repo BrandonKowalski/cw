@@ -1,6 +1,7 @@
 package apply_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io/fs"
@@ -509,5 +510,179 @@ func TestApplyRemovesPlayCounts(t *testing.T) {
 	e.sync(t, 1)
 	if e.exists(t, "iPod_Control/iTunes/Play Counts") {
 		t.Fatal("Play Counts still present")
+	}
+}
+
+func corruptCover(t *testing.T, path string) {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := bytes.Index(b, []byte("\x89PNG"))
+	if i < 0 {
+		t.Fatal("no embedded png")
+	}
+	copy(b[i:], bytes.Repeat([]byte{0xAB}, 64))
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func hasWarning(ws []string, want string) bool {
+	for _, w := range ws {
+		if strings.HasPrefix(w, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestApplyBadCoverSyncsWithoutArt(t *testing.T) {
+	e := newEnv(t)
+	p := e.flac(t, "A/one.flac", "One", 440, true)
+	corruptCover(t, p)
+	rep, rec := e.sync(t, 1)
+	if rep.Uploaded != 1 || len(rep.Failures) != 0 || len(rec.fails) != 0 {
+		t.Fatalf("report %+v", rep)
+	}
+	if !hasWarning(rep.Warnings, "no cover art for A/one.flac: ") {
+		t.Fatalf("warnings %v", rep.Warnings)
+	}
+	tr := e.state(t).Tracks["A/one.flac"]
+	if tr == nil || tr.ArtID != "" || tr.ArtSize != 0 {
+		t.Fatalf("state %+v", tr)
+	}
+	if tracks := e.db(t); len(tracks) != 1 || tracks[0].MHIILink != 0 {
+		t.Fatalf("db %+v", tracks)
+	}
+}
+
+func TestApplyBadCoverOnTagUpdateDropsArt(t *testing.T) {
+	e := newEnv(t)
+	p := e.flac(t, "A/one.flac", "One", 440, true)
+	e.sync(t, 1)
+	before := e.state(t).Tracks["A/one.flac"]
+	if before.ArtID == "" {
+		t.Fatal("no art after first sync")
+	}
+	corruptCover(t, p)
+	bump(t, p)
+	rep, _ := e.sync(t, 1)
+	if rep.TagUpdated != 1 || len(rep.Failures) != 0 || !hasWarning(rep.Warnings, "no cover art for A/one.flac: ") {
+		t.Fatalf("report %+v", rep)
+	}
+	after := e.state(t).Tracks["A/one.flac"]
+	if after.ArtID != "" || after.ArtSize != 0 || after.TagFP == before.TagFP || after.DevicePath != before.DevicePath {
+		t.Fatalf("state %+v", after)
+	}
+	art, err := os.ReadDir(filepath.Join(e.mount, "iPod_Control", "cw", "art"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(art) != 0 {
+		t.Fatalf("unreferenced art kept %v", art)
+	}
+}
+
+func TestApplyMissingArtCacheWarns(t *testing.T) {
+	e := newEnv(t)
+	e.flac(t, "A/one.flac", "One", 440, true)
+	e.sync(t, 1)
+	tr := e.state(t).Tracks["A/one.flac"]
+	if err := os.Remove(filepath.Join(e.mount, "iPod_Control", "cw", "art", tr.ArtID+"-1029.rgb")); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := e.sync(t, 1)
+	if !hasWarning(rep.Warnings, "cover art cache missing for A/one.flac") {
+		t.Fatalf("warnings %v", rep.Warnings)
+	}
+	if tracks := e.db(t); len(tracks) != 1 || tracks[0].MHIILink != 0 {
+		t.Fatalf("db %+v", tracks)
+	}
+}
+
+func TestWriteDatabasesReportsWrongSizeCache(t *testing.T) {
+	e := newEnv(t)
+	e.flac(t, "A/one.flac", "One", 440, true)
+	e.sync(t, 1)
+	st := e.state(t)
+	tr := st.Tracks["A/one.flac"]
+	e.write(t, "iPod_Control/cw/art/"+tr.ArtID+"-1028.rgb", "short")
+	d, err := device.Open(e.mount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := apply.WriteDatabases(d, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ws) != 1 || ws[0] != "A/one.flac" {
+		t.Fatalf("missing %v", ws)
+	}
+}
+
+func TestApplyCleanupFailureIsWarning(t *testing.T) {
+	e := newEnv(t)
+	e.flac(t, "one.flac", "One", 440, false)
+	e.write(t, "iPod_Control/Music/F00/OLD1.mp3", "old")
+	dir := filepath.Join(e.mount, "iPod_Control", "Music", "F00")
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	d, st, p := e.build(t)
+	rep, err := apply.Apply(context.Background(), d, st, p, e.lib, apply.Options{Jobs: 1, TempDir: e.tmp, Now: func() time.Time { return e.now }}, &recorder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasWarning(rep.Warnings, "could not remove iPod_Control/Music/F00/OLD1.mp3: ") {
+		t.Fatalf("warnings %v", rep.Warnings)
+	}
+	if rep.Elapsed < 0 || rep.Uploaded != 1 {
+		t.Fatalf("report %+v", rep)
+	}
+}
+
+func TestApplyClearsDBPending(t *testing.T) {
+	e := newEnv(t)
+	e.flac(t, "one.flac", "One", 440, false)
+	e.sync(t, 1)
+	if e.state(t).DBPending {
+		t.Fatal("db_pending left set after apply")
+	}
+}
+
+func TestRecoverRewritesPendingDB(t *testing.T) {
+	e := newEnv(t)
+	e.flac(t, "one.flac", "One", 440, true)
+	e.sync(t, 1)
+	db := filepath.Join(e.mount, "iPod_Control", "iTunes", "iTunesDB")
+	if err := os.Remove(db); err != nil {
+		t.Fatal(err)
+	}
+	st := e.state(t)
+	st.DBPending = true
+	if err := state.Save(e.mount, st); err != nil {
+		t.Fatal(err)
+	}
+	d, err := device.Open(e.mount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st = e.state(t)
+	ok, err := apply.Recover(d, st)
+	if err != nil || !ok {
+		t.Fatalf("recover %v %v", ok, err)
+	}
+	if tracks := e.db(t); len(tracks) != 1 || tracks[0].MHIILink == 0 {
+		t.Fatalf("db %+v", tracks)
+	}
+	if e.state(t).DBPending {
+		t.Fatal("flag not cleared on disk")
+	}
+	ok, err = apply.Recover(d, e.state(t))
+	if err != nil || ok {
+		t.Fatalf("second recover %v %v", ok, err)
 	}
 }

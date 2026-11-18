@@ -2,7 +2,6 @@ package apply
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -39,6 +38,7 @@ type Options struct {
 type Report struct {
 	Uploaded, AudioUpdated, TagUpdated, Deleted, Unmanaged int
 	Failures                                               []plan.Failure
+	Warnings                                               []string
 	Elapsed                                                time.Duration
 }
 
@@ -48,6 +48,7 @@ type outcome struct {
 	res     transcode.Result
 	artID   string
 	artSize uint32
+	artWarn error
 	err     error
 }
 
@@ -65,22 +66,28 @@ type artJob struct {
 	err  error
 }
 
-func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan, lib string, o Options, prog Progress) (Report, error) {
-	if len(p.Blockers) > 0 {
-		return Report{}, fmt.Errorf("sync blocked: %s", strings.Join(p.Blockers, "; "))
-	}
+func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan, lib string, o Options, prog Progress) (rep Report, err error) {
 	now := time.Now
 	if o.Now != nil {
 		now = o.Now
 	}
 	start := now()
+	wrote := false
+	defer func() {
+		if wrote {
+			unix.Sync()
+		}
+		rep.Elapsed = now().Sub(start)
+	}()
+	if len(p.Blockers) > 0 {
+		return rep, fmt.Errorf("sync blocked: %s", strings.Join(p.Blockers, "; "))
+	}
 	jobs := max(o.Jobs, 1)
 	tmpDir := o.TempDir
 	if tmpDir == "" {
 		tmpDir = os.TempDir()
 	}
 	a := &applier{d: d, lib: lib, tmpDir: tmpDir, artJobs: map[string]*artJob{}}
-	var rep Report
 
 	var work, tagItems []plan.Item
 	for _, it := range p.Items {
@@ -92,6 +99,7 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 	}
 
 	prog.Phase("transcoding", len(work))
+	wrote = true
 	done := a.transcodeAll(ctx, work, jobs, prog, &rep)
 	prog.Done()
 	if err := ctx.Err(); err != nil {
@@ -107,6 +115,9 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 	for _, oc := range done {
 		tr := oc.item.Track
 		rel := tr.Entry.RelPath
+		if oc.artWarn != nil {
+			rep.Warnings = append(rep.Warnings, artWarning(rel, oc.artWarn))
+		}
 		nt := &state.Track{
 			DevicePath:    oc.path,
 			SourceSize:    tr.Entry.Size,
@@ -145,12 +156,9 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 			prog.Fail(rel, err)
 			continue
 		}
-		id, size, err := a.ensureArt(tr.Cover)
-		if err != nil {
-			err = fmt.Errorf("update %s: %w", rel, err)
-			rep.Failures = append(rep.Failures, plan.Failure{RelPath: rel, Err: err})
-			prog.Fail(rel, err)
-			continue
+		id, size, artErr := a.ensureArt(tr.Cover)
+		if artErr != nil {
+			rep.Warnings = append(rep.Warnings, artWarning(rel, artErr))
 		}
 		old.Tags = tr.Tags
 		old.TagFP = tr.TagFP
@@ -176,18 +184,23 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 	}
 	rep.Failures = append(rep.Failures, p.Failures...)
 	prog.Done()
-	if err := ctx.Err(); err != nil {
-		a.discard(done)
-		return rep, err
-	}
 
 	st.LastSync = now().Unix()
+	st.DBPending = true
 	if err := state.Save(d.Mount, st); err != nil {
 		return rep, err
 	}
 
 	prog.Phase("writing database", 1)
-	if err := WriteDatabases(d, st); err != nil {
+	missing, err := WriteDatabases(d, st)
+	if err != nil {
+		return rep, err
+	}
+	for _, rel := range missing {
+		rep.Warnings = append(rep.Warnings, "cover art cache missing for "+rel)
+	}
+	st.DBPending = false
+	if err := state.Save(d.Mount, st); err != nil {
 		return rep, err
 	}
 	pc := filepath.Join(d.Mount, "iPod_Control", "iTunes", "Play Counts")
@@ -197,10 +210,26 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 	prog.Step("iTunesDB")
 	prog.Done()
 
-	err := a.cleanup(st, p, prog, &rep)
+	return rep, a.cleanup(st, p, prog, &rep)
+}
+
+func Recover(d *device.Device, st *state.State) (bool, error) {
+	if !st.DBPending {
+		return false, nil
+	}
+	if _, err := WriteDatabases(d, st); err != nil {
+		return false, err
+	}
+	st.DBPending = false
+	if err := state.Save(d.Mount, st); err != nil {
+		return false, err
+	}
 	unix.Sync()
-	rep.Elapsed = now().Sub(start)
-	return rep, err
+	return true, nil
+}
+
+func artWarning(rel string, err error) string {
+	return fmt.Sprintf("no cover art for %s: %v", rel, err)
 }
 
 func (a *applier) transcodeAll(ctx context.Context, work []plan.Item, jobs int, prog Progress, rep *Report) []outcome {
@@ -256,11 +285,7 @@ func (a *applier) transcodeOne(ctx context.Context, it plan.Item) outcome {
 		oc.err = err
 		return oc
 	}
-	oc.artID, oc.artSize, oc.err = a.ensureArt(tr.Cover)
-	if oc.err != nil {
-		oc.err = fmt.Errorf("%s: %w", tr.Entry.RelPath, oc.err)
-		return oc
-	}
+	oc.artID, oc.artSize, oc.artWarn = a.ensureArt(tr.Cover)
 	f, err := os.CreateTemp(a.tmpDir, "cw-*.m4a")
 	if err != nil {
 		oc.err = fmt.Errorf("create temp file: %w", err)
@@ -402,21 +427,17 @@ func (a *applier) cleanup(st *state.State, p *plan.Plan, prog Progress, rep *Rep
 		}
 	}
 	prog.Phase("cleaning up", len(remove))
-	var errs []error
 	for _, path := range remove {
 		rel, _ := filepath.Rel(a.d.Mount, path)
 		rel = filepath.ToSlash(rel)
 		if err := os.RemoveAll(path); err != nil {
-			errs = append(errs, err)
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("could not remove %s: %v", rel, err))
 			prog.Fail(rel, err)
 			continue
 		}
 		prog.Step(rel)
 	}
 	prog.Done()
-	if len(errs) > 0 {
-		return fmt.Errorf("clean up: %w", errors.Join(errs...))
-	}
 	return nil
 }
 

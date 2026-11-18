@@ -24,7 +24,7 @@ const (
 	firstArtworkID = 100
 )
 
-func WriteDatabases(d *device.Device, st *state.State) error {
+func WriteDatabases(d *device.Device, st *state.State) ([]string, error) {
 	keys := make([]string, 0, len(st.Tracks))
 	for k := range st.Tracks {
 		keys = append(keys, k)
@@ -34,6 +34,7 @@ func WriteDatabases(d *device.Device, st *state.State) error {
 	})
 	tracks := make([]itunesdb.Track, 0, len(keys))
 	var arts []artwork.Entry
+	var missing []string
 	nextArt := uint32(firstArtworkID)
 	for i, k := range keys {
 		s := st.Tracks[k]
@@ -51,9 +52,11 @@ func WriteDatabases(d *device.Device, st *state.State) error {
 		if s.ArtID != "" {
 			thumbs, err := loadThumbs(d.Mount, s.ArtID)
 			if err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return err
+				return nil, err
 			}
-			if err == nil {
+			if err != nil {
+				missing = append(missing, k)
+			} else {
 				t.ArtworkID = nextArt
 				t.ArtworkSize = s.ArtSize
 				arts = append(arts, artwork.Entry{ImageID: nextArt, SongDBID: s.DBID, Thumbs: thumbs, SourceSize: s.ArtSize})
@@ -63,16 +66,16 @@ func WriteDatabases(d *device.Device, st *state.State) error {
 		tracks = append(tracks, t)
 	}
 	if err := artwork.WriteAll(d.Mount, arts); err != nil {
-		return err
+		return nil, err
 	}
 	var buf bytes.Buffer
 	if err := itunesdb.Write(&buf, tracks, rand.Uint64()); err != nil {
-		return fmt.Errorf("build iTunesDB: %w", err)
+		return nil, fmt.Errorf("build iTunesDB: %w", err)
 	}
 	if err := fsutil.WriteAtomic(filepath.Join(d.Mount, "iPod_Control", "iTunes", "iTunesDB"), buf.Bytes()); err != nil {
-		return fmt.Errorf("write iTunesDB: %w", err)
+		return nil, fmt.Errorf("write iTunesDB: %w", err)
 	}
-	return nil
+	return missing, nil
 }
 
 func less(a, b *state.Track, ka, kb string) bool {
