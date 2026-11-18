@@ -9,6 +9,7 @@ import (
 
 	"github.com/BrandonKowalski/cw/internal/library"
 	"github.com/BrandonKowalski/cw/internal/state"
+	"github.com/BrandonKowalski/cw/internal/units"
 )
 
 type Kind int
@@ -20,8 +21,6 @@ const (
 )
 
 const minFree = 64 << 20
-
-const cwPrefix = "iPod_Control/cw/"
 
 type Item struct {
 	Kind  Kind
@@ -150,7 +149,7 @@ func Build(in Input) *Plan {
 		referenced[t.DevicePath] = true
 	}
 	for _, f := range in.DeviceFiles {
-		if referenced[f] || strings.HasPrefix(f, cwPrefix) || strings.HasPrefix(path.Base(f), ".") {
+		if referenced[f] || strings.HasPrefix(path.Base(f), ".") {
 			continue
 		}
 		p.Unmanaged = append(p.Unmanaged, f)
@@ -160,7 +159,7 @@ func Build(in Input) *Plan {
 	p.FreeAfter = in.Free - p.BytesIn + p.BytesFreed
 	if p.BytesIn > 0 && in.Free-p.BytesIn < minFree {
 		need := p.BytesIn + minFree
-		p.Blockers = append(p.Blockers, fmt.Sprintf("not enough space on iPod: need %s, have %s", formatSize(need), formatSize(in.Free)))
+		p.Blockers = append(p.Blockers, fmt.Sprintf("not enough space on iPod: need %s, have %s", units.Size(need), units.Size(in.Free)))
 	}
 
 	p.Warnings = append(p.Warnings, duplicateWarnings(tagsByPath)...)
@@ -193,22 +192,4 @@ func duplicateWarnings(tagsByPath map[string]library.Tags) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func formatSize(n int64) string {
-	if n < 0 {
-		return "-" + formatSize(-n)
-	}
-	const unit = 1000
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	v := float64(n)
-	for _, s := range []string{"kB", "MB", "GB", "TB"} {
-		v /= unit
-		if v < unit || s == "TB" {
-			return fmt.Sprintf("%.1f %s", v, s)
-		}
-	}
-	return ""
 }

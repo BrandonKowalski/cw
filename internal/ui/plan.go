@@ -8,6 +8,7 @@ import (
 
 	"github.com/BrandonKowalski/cw/internal/library"
 	"github.com/BrandonKowalski/cw/internal/plan"
+	"github.com/BrandonKowalski/cw/internal/units"
 )
 
 type PlanInfo struct {
@@ -20,10 +21,6 @@ type PlanInfo struct {
 type row struct {
 	rel  string
 	tags library.Tags
-}
-
-func RenderPlan(w io.Writer, p *plan.Plan, verbose bool) {
-	RenderPlanFor(w, PlanInfo{}, p, verbose)
 }
 
 func RenderPlanFor(w io.Writer, info PlanInfo, p *plan.Plan, verbose bool) {
@@ -80,7 +77,7 @@ func RenderPlanFor(w io.Writer, info PlanInfo, p *plan.Plan, verbose bool) {
 		after += " / " + FormatCount(info.Threshold)
 	}
 	fmt.Fprintf(w, "  %-14s%s\n", "tracks after", after)
-	fmt.Fprintf(w, "  %-14s%s\n", "free after", FormatSize(p.FreeAfter))
+	fmt.Fprintf(w, "  %-14s%s\n", "free after", units.Size(p.FreeAfter))
 
 	if len(p.Warnings) > 0 {
 		fmt.Fprintln(w)
@@ -107,7 +104,7 @@ func sizeNote(n int64, count int) string {
 	if count == 0 {
 		return ""
 	}
-	return "~" + FormatSize(n)
+	return "~" + units.Size(n)
 }
 
 func summary(w io.Writer, label string, n int, unit, note string) {

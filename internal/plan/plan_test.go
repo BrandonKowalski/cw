@@ -8,6 +8,7 @@ import (
 
 	"github.com/BrandonKowalski/cw/internal/library"
 	"github.com/BrandonKowalski/cw/internal/state"
+	"github.com/BrandonKowalski/cw/internal/units"
 )
 
 var t0 = time.Unix(1700000000, 5)
@@ -137,8 +138,6 @@ func TestBuildUnmanagedFiles(t *testing.T) {
 		DeviceFiles: []string{
 			"iPod_Control/Music/F01/AAAA.mp3",
 			"iPod_Control/Music/F02/KEEP.m4a",
-			"iPod_Control/cw/state.json",
-			"iPod_Control/cw/art/x.jpg",
 			"iPod_Control/Music/F01/._AAAA.mp3",
 			"iPod_Control/Music/.DS_Store",
 		},
@@ -279,7 +278,7 @@ func TestBuildSpaceBlockerMessage(t *testing.T) {
 	e := entry("a", 1000, t0)
 	l := &loader{tracks: map[string]*library.Track{"a": track(e, "t", "a", 1, 1)}}
 	p := Build(Input{Entries: []library.Entry{e}, State: newState(map[string]*state.Track{}), Free: 1000000, Threshold: 20000, EncodeVersion: "alac-1", Load: l.load})
-	want := "not enough space on iPod: need " + formatSize(1100+64<<20) + ", have 1.0 MB"
+	want := "not enough space on iPod: need " + units.Size(1100+64<<20) + ", have 1.0 MB"
 	if len(p.Blockers) != 1 || p.Blockers[0] != want {
 		t.Errorf("blockers = %v, want %q", p.Blockers, want)
 	}

@@ -48,24 +48,6 @@ func FormatCount(n int) string {
 	return out
 }
 
-func FormatSize(n int64) string {
-	if n < 0 {
-		return "-" + FormatSize(-n)
-	}
-	const unit = 1000
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	v := float64(n)
-	for _, s := range []string{"kB", "MB", "GB", "TB"} {
-		v /= unit
-		if v < unit || s == "TB" {
-			return fmt.Sprintf("%.1f %s", v, s)
-		}
-	}
-	return ""
-}
-
 func FormatDuration(d time.Duration) string {
 	secs := int(d.Round(time.Second) / time.Second)
 	switch {

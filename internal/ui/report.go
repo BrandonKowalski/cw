@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/BrandonKowalski/cw/internal/apply"
+	"github.com/BrandonKowalski/cw/internal/units"
 )
 
 type Info struct {
@@ -44,8 +45,8 @@ func RenderInfo(w io.Writer, i Info) {
 	if i.Model != "" {
 		row("model", i.Model)
 	}
-	row("capacity", FormatSize(i.Capacity))
-	row("free", FormatSize(i.Free))
+	row("capacity", units.Size(i.Capacity))
+	row("free", units.Size(i.Free))
 	row("tracks", FormatCount(i.Tracks))
 	last := "never"
 	if !i.LastSync.IsZero() {

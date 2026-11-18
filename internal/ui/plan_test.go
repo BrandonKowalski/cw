@@ -57,7 +57,7 @@ func TestRenderPlanSummaryAndCollapse(t *testing.T) {
 		t.Fatal(out)
 	}
 	b.Reset()
-	ui.RenderPlan(&b, threeUploads(), true)
+	ui.RenderPlanFor(&b, ui.PlanInfo{}, threeUploads(), true)
 	for _, f := range []string{"01.flac", "02.flac", "03.flac"} {
 		if !strings.Contains(b.String(), "Artist/Album/"+f) {
 			t.Fatalf("missing %s in:\n%s", f, b.String())
@@ -79,7 +79,7 @@ func TestRenderPlanBlockersFirst(t *testing.T) {
 	p.Failures = []plan.Failure{{RelPath: "x.flac", Err: errors.New("bad header")}}
 	p.Warnings = []string{"possible duplicate: a"}
 	var b bytes.Buffer
-	ui.RenderPlan(&b, p, false)
+	ui.RenderPlanFor(&b, ui.PlanInfo{}, p, false)
 	lines := strings.Split(strings.TrimSpace(b.String()), "\n")
 	if lines[0] != "Cannot sync" || !strings.Contains(lines[1], "refusing to wipe") {
 		t.Fatal(b.String())
@@ -93,7 +93,7 @@ func TestRenderPlanBlockersFirst(t *testing.T) {
 
 func TestRenderPlanEmpty(t *testing.T) {
 	var b bytes.Buffer
-	ui.RenderPlan(&b, &plan.Plan{}, false)
+	ui.RenderPlanFor(&b, ui.PlanInfo{}, &plan.Plan{}, false)
 	if b.String() != "Already in sync.\n" {
 		t.Fatalf("%q", b.String())
 	}
@@ -102,12 +102,12 @@ func TestRenderPlanEmpty(t *testing.T) {
 func TestRenderPlanUnmanagedOnlyVerbose(t *testing.T) {
 	p := &plan.Plan{Unmanaged: []string{"iPod_Control/Music/F00/AAAA.m4a"}}
 	var b bytes.Buffer
-	ui.RenderPlan(&b, p, false)
+	ui.RenderPlanFor(&b, ui.PlanInfo{}, p, false)
 	if strings.Contains(b.String(), "AAAA.m4a") || !strings.Contains(b.String(), "not managed       1 file") {
 		t.Fatal(b.String())
 	}
 	b.Reset()
-	ui.RenderPlan(&b, p, true)
+	ui.RenderPlanFor(&b, ui.PlanInfo{}, p, true)
 	if !strings.Contains(b.String(), "AAAA.m4a") {
 		t.Fatal(b.String())
 	}
@@ -166,7 +166,7 @@ func TestRenderInfo(t *testing.T) {
 func TestRenderPlanSingular(t *testing.T) {
 	p := &plan.Plan{Items: []plan.Item{upload("A/B/01.flac")}, Unmanaged: []string{"x"}}
 	var b bytes.Buffer
-	ui.RenderPlan(&b, p, false)
+	ui.RenderPlanFor(&b, ui.PlanInfo{}, p, false)
 	if !strings.Contains(b.String(), "1 track ") && !strings.Contains(b.String(), "1 track\n") || !strings.Contains(b.String(), "1 file") || strings.Contains(b.String(), "1 files") {
 		t.Fatal(b.String())
 	}
