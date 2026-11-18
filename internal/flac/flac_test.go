@@ -70,7 +70,7 @@ func blockStarts(t *testing.T, b []byte) map[byte]int {
 		typ := b[off] & 0x7f
 		last := b[off]&0x80 != 0
 		starts[typ] = off
-		off += 4 + int(b[off+1])<<16 | int(b[off+2])<<8 | int(b[off+3])
+		off += 4 + (int(b[off+1])<<16 | int(b[off+2])<<8 | int(b[off+3]))
 		if last {
 			return starts
 		}
