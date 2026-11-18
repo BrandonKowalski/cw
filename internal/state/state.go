@@ -3,7 +3,6 @@ package state
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
 
@@ -67,17 +66,4 @@ func Save(mount string, s *State) error {
 		return fmt.Errorf("save state: %w", err)
 	}
 	return nil
-}
-
-func (s *State) NewDBID() uint64 {
-	used := make(map[uint64]bool, len(s.Tracks))
-	for _, t := range s.Tracks {
-		used[t.DBID] = true
-	}
-	for {
-		id := rand.Uint64()
-		if id != 0 && !used[id] {
-			return id
-		}
-	}
 }

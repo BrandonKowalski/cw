@@ -53,16 +53,3 @@ func TestLoadCorrupt(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
-
-func TestNewDBID(t *testing.T) {
-	s := &state.State{Version: 1, Tracks: map[string]*state.Track{}}
-	seen := map[uint64]bool{}
-	for i := 0; i < 1000; i++ {
-		id := s.NewDBID()
-		if id == 0 || seen[id] {
-			t.Fatal(id)
-		}
-		seen[id] = true
-		s.Tracks[string(rune('a'+i%26))+string(rune(i))] = &state.Track{DBID: id}
-	}
-}
