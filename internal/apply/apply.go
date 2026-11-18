@@ -51,6 +51,7 @@ type outcome struct {
 	artSize uint32
 	artWarn error
 	err     error
+	lost    bool
 }
 
 type applier struct {
@@ -110,8 +111,12 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 
 	prog.Phase("transcoding", len(work))
 	wrote = true
-	done := a.transcodeAll(ctx, work, jobs, prog, &rep)
+	done, lost := a.transcodeAll(ctx, work, jobs, prog, &rep)
 	prog.Done()
+	if lost != nil {
+		a.discard(done)
+		return rep, lost
+	}
 	if err := ctx.Err(); err != nil {
 		a.discard(done)
 		return rep, err
@@ -261,7 +266,9 @@ func artWarning(rel string, err error) string {
 	return fmt.Sprintf("no cover art for %s: %v", rel, err)
 }
 
-func (a *applier) transcodeAll(ctx context.Context, work []plan.Item, jobs int, prog Progress, rep *Report) []outcome {
+func (a *applier) transcodeAll(parent context.Context, work []plan.Item, jobs int, prog Progress, rep *Report) ([]outcome, error) {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
 	in := make(chan plan.Item)
 	out := make(chan outcome)
 	var wg sync.WaitGroup
@@ -289,8 +296,16 @@ func (a *applier) transcodeAll(ctx context.Context, work []plan.Item, jobs int, 
 		close(out)
 	}()
 	var done []outcome
+	var lost error
 	for oc := range out {
 		rel := oc.item.Track.Entry.RelPath
+		if oc.lost {
+			if lost == nil {
+				lost = oc.err
+				cancel()
+			}
+			continue
+		}
 		if oc.err != nil {
 			if ctx.Err() == nil {
 				rep.Failures = append(rep.Failures, plan.Failure{RelPath: rel, Err: oc.err})
@@ -304,7 +319,7 @@ func (a *applier) transcodeAll(ctx context.Context, work []plan.Item, jobs int, 
 	sort.Slice(done, func(i, j int) bool {
 		return done[i].item.Track.Entry.RelPath < done[j].item.Track.Entry.RelPath
 	})
-	return done
+	return done, lost
 }
 
 func (a *applier) transcodeOne(ctx context.Context, it plan.Item) outcome {
@@ -334,8 +349,17 @@ func (a *applier) transcodeOne(ctx context.Context, it plan.Item) outcome {
 	}
 	if oc.path, err = a.place(tmp); err != nil {
 		oc.err = fmt.Errorf("%s: %w", tr.Entry.RelPath, err)
+		if deviceGone(a.d.Mount) {
+			oc.lost = true
+			oc.err = fmt.Errorf("iPod disconnected: %w", err)
+		}
 	}
 	return oc
+}
+
+func deviceGone(mount string) bool {
+	fi, err := os.Stat(filepath.Join(mount, "iPod_Control"))
+	return err != nil || !fi.IsDir()
 }
 
 func (a *applier) place(tmp string) (string, error) {

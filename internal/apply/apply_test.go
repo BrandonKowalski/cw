@@ -877,3 +877,26 @@ func TestApplyRerendersMissingArtForLoadedTrack(t *testing.T) {
 		t.Fatalf("linked %d", linked)
 	}
 }
+
+func TestApplyDeviceLossAborts(t *testing.T) {
+	e := newEnv(t)
+	for i, n := range []string{"one", "two", "three"} {
+		e.flac(t, n+".flac", n, 440+110*i, false)
+	}
+	d, st, p := e.build(t)
+	ctl := filepath.Join(e.mount, "iPod_Control")
+	if err := os.RemoveAll(ctl); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ctl, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	rep, err := apply.Apply(context.Background(), d, st, p, e.lib, apply.Options{Jobs: 1, TempDir: e.tmp, Now: func() time.Time { return e.now }}, rec)
+	if err == nil || !strings.HasPrefix(err.Error(), "iPod disconnected: ") {
+		t.Fatalf("err %v", err)
+	}
+	if len(rep.Failures) != 0 || len(rec.fails) != 0 || rep.Uploaded != 0 {
+		t.Fatalf("report %+v fails %v", rep, rec.fails)
+	}
+}
