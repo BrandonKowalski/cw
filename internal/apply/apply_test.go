@@ -510,9 +510,13 @@ func TestApplyRemovesPlayCounts(t *testing.T) {
 	e := newEnv(t)
 	e.flac(t, "one.flac", "One", 440, false)
 	e.write(t, "iPod_Control/iTunes/Play Counts", "pc")
+	e.write(t, "iPod_Control/iTunes/OTGPlaylistInfo", "otg")
 	e.sync(t, 1)
 	if e.exists(t, "iPod_Control/iTunes/Play Counts") {
 		t.Fatal("Play Counts still present")
+	}
+	if e.exists(t, "iPod_Control/iTunes/OTGPlaylistInfo") {
+		t.Fatal("OTGPlaylistInfo still present")
 	}
 }
 

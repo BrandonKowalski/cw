@@ -203,9 +203,10 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 	if err := state.Save(d.Mount, st); err != nil {
 		return rep, err
 	}
-	pc := filepath.Join(d.Mount, "iPod_Control", "iTunes", "Play Counts")
-	if err := os.Remove(pc); err != nil && !os.IsNotExist(err) {
-		return rep, fmt.Errorf("remove Play Counts: %w", err)
+	for _, name := range []string{"Play Counts", "OTGPlaylistInfo"} {
+		if err := os.Remove(filepath.Join(d.Mount, "iPod_Control", "iTunes", name)); err != nil && !os.IsNotExist(err) {
+			return rep, fmt.Errorf("remove %s: %w", name, err)
+		}
 	}
 	prog.Step("iTunesDB")
 	prog.Done()
