@@ -402,6 +402,9 @@ func TestApplyTranscodeFailureLeavesStateAndContinues(t *testing.T) {
 	if rep.Uploaded != 1 || len(rep.Failures) != 1 || rep.Failures[0].RelPath != "broken.flac" {
 		t.Fatalf("report %+v", rep)
 	}
+	if msg := rep.Failures[0].Err.Error(); !strings.HasPrefix(msg, "broken.flac: ") || strings.Contains(msg, e.lib) {
+		t.Fatalf("failure error %q", msg)
+	}
 	if len(rec.fails) != 1 || rec.fails[0] != "broken.flac" {
 		t.Fatalf("progress fails %v", rec.fails)
 	}

@@ -296,7 +296,7 @@ func (a *applier) transcodeOne(ctx context.Context, it plan.Item) outcome {
 	defer os.Remove(tmp)
 	src := filepath.Join(a.lib, filepath.FromSlash(tr.Entry.RelPath))
 	if err := transcode.Run(ctx, src, tmp, tr.Stream); err != nil {
-		oc.err = err
+		oc.err = fmt.Errorf("%s: %w", tr.Entry.RelPath, err)
 		return oc
 	}
 	if oc.res, err = transcode.Inspect(tmp, tr.Stream); err != nil {

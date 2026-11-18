@@ -50,7 +50,7 @@ func Run(ctx context.Context, src, dst string, si flac.StreamInfo) error {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		os.Remove(dst)
-		return fmt.Errorf("ffmpeg %s: %w: %s", src, err, lastLine(stderr.String()))
+		return fmt.Errorf("ffmpeg: %w: %s", err, lastLine(stderr.String()))
 	}
 	return nil
 }

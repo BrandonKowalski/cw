@@ -103,6 +103,9 @@ func TestRunFailureRemovesOutput(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
+	if strings.Contains(err.Error(), dir) {
+		t.Fatalf("error leaks absolute path: %v", err)
+	}
 	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
 		t.Fatalf("dst exists: %v", statErr)
 	}
