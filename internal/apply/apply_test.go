@@ -600,12 +600,19 @@ func TestApplyMissingArtCacheWarns(t *testing.T) {
 	if err := os.Remove(filepath.Join(e.mount, "iPod_Control", "cw", "art", tr.ArtID+"-1029.rgb")); err != nil {
 		t.Fatal(err)
 	}
+	e.flac(t, "B/two.flac", "Two", 550, false)
 	rep, _ := e.sync(t, 1)
 	if !hasWarning(rep.Warnings, "cover art cache missing for A/one.flac") {
 		t.Fatalf("warnings %v", rep.Warnings)
 	}
-	if tracks := e.db(t); len(tracks) != 1 || tracks[0].MHIILink != 0 {
+	tracks := e.db(t)
+	if len(tracks) != 2 {
 		t.Fatalf("db %+v", tracks)
+	}
+	for _, tr := range tracks {
+		if tr.MHIILink != 0 {
+			t.Fatalf("db %+v", tracks)
+		}
 	}
 }
 
@@ -732,5 +739,32 @@ func TestApplyRestoresMissingDeviceFile(t *testing.T) {
 	after := e.state(t).Tracks["one.flac"]
 	if after.DBID != before.DBID || after.DateAdded != before.DateAdded || !e.exists(t, after.DevicePath) {
 		t.Fatalf("before %+v after %+v", before, after)
+	}
+}
+
+func TestApplyTouchedOnlyKeepsDatabase(t *testing.T) {
+	e := newEnv(t)
+	p := e.flac(t, "one.flac", "One", 440, false)
+	e.sync(t, 1)
+	e.write(t, "iPod_Control/iTunes/iTunesDB", "sentinel")
+	bump(t, p)
+	d, st, pl := e.build(t)
+	if !pl.OnlyTouched() {
+		t.Fatalf("plan %+v", pl)
+	}
+	if _, err := apply.Apply(context.Background(), d, st, pl, e.lib, apply.Options{Jobs: 1, TempDir: e.tmp, Now: func() time.Time { return e.now }}, &recorder{}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(e.mount, "iPod_Control", "iTunes", "iTunesDB"))
+	if err != nil || string(b) != "sentinel" {
+		t.Fatalf("iTunesDB rewritten: %v %q", err, b)
+	}
+	fi, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := e.state(t)
+	if saved.Tracks["one.flac"].SourceMTime != fi.ModTime().UnixNano() || saved.DBPending {
+		t.Fatalf("state %+v", saved)
 	}
 }

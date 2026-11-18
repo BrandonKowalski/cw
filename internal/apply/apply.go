@@ -82,6 +82,15 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 	if len(p.Blockers) > 0 {
 		return rep, fmt.Errorf("sync blocked: %s", strings.Join(p.Blockers, "; "))
 	}
+	if len(p.Items) == 0 && len(p.Deletes) == 0 && len(p.Unmanaged) == 0 {
+		rep.Failures = append(rep.Failures, p.Failures...)
+		if len(p.Touched) == 0 {
+			return rep, nil
+		}
+		touch(st, p)
+		wrote = true
+		return rep, state.Save(d.Mount, st)
+	}
 	jobs := max(o.Jobs, 1)
 	tmpDir := o.TempDir
 	if tmpDir == "" {
@@ -169,12 +178,7 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 		rep.TagUpdated++
 		prog.Step(rel)
 	}
-	for rel, e := range p.Touched {
-		if t := st.Tracks[rel]; t != nil {
-			t.SourceSize = e.Size
-			t.SourceMTime = e.ModTime.UnixNano()
-		}
-	}
+	touch(st, p)
 	for _, del := range p.Deletes {
 		if _, ok := st.Tracks[del.RelPath]; ok {
 			delete(st.Tracks, del.RelPath)
@@ -212,6 +216,15 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 	prog.Done()
 
 	return rep, a.cleanup(st, p, prog, &rep)
+}
+
+func touch(st *state.State, p *plan.Plan) {
+	for rel, e := range p.Touched {
+		if t := st.Tracks[rel]; t != nil {
+			t.SourceSize = e.Size
+			t.SourceMTime = e.ModTime.UnixNano()
+		}
+	}
 }
 
 func Recover(d *device.Device, st *state.State) (bool, error) {
