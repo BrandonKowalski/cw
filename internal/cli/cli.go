@@ -203,7 +203,11 @@ func runPlan(name string, args []string, stdin io.Reader, stdout, stderr io.Writ
 		jobs = o.jobs
 	}
 	if jobs < 1 {
-		fmt.Fprintln(stderr, "--jobs must be at least 1")
+		if o.jobsSet {
+			fmt.Fprintln(stderr, "--jobs must be at least 1")
+		} else {
+			fmt.Fprintln(stderr, "jobs in config must be at least 1")
+		}
 		return 2
 	}
 	lib, err := resolveLibrary(o, cfg)

@@ -144,7 +144,7 @@ func TestCLIConfigJobsInvalid(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, _, errs := run(t, "", append([]string{"diff"}, e.flags()...)...)
-	if code != 2 || !strings.Contains(errs, "--jobs must be at least 1") {
+	if code != 2 || !strings.Contains(errs, "jobs in config must be at least 1") {
 		t.Fatal(code, errs)
 	}
 }
