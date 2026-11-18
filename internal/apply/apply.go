@@ -330,7 +330,7 @@ func (a *applier) place(tmp string) (string, error) {
 	}
 	_, err = io.Copy(f, src)
 	if err == nil {
-		err = f.Sync()
+		err = fsutil.FullSync(f)
 	}
 	if cerr := f.Close(); err == nil {
 		err = cerr

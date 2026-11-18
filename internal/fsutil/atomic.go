@@ -20,9 +20,9 @@ func WriteAtomic(path string, data []byte) error {
 		f.Close()
 		return fmt.Errorf("write %s: %w", tmp, err)
 	}
-	if err := f.Sync(); err != nil {
+	if err := FullSync(f); err != nil {
 		f.Close()
-		return fmt.Errorf("sync %s: %w", tmp, err)
+		return err
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close %s: %w", tmp, err)
