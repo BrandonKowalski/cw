@@ -398,7 +398,7 @@ func (a *applier) cleanup(st *state.State, p *plan.Plan, prog Progress, rep *Rep
 	referenced := make(map[string]bool, len(st.Tracks))
 	arts := map[string]bool{}
 	for _, t := range st.Tracks {
-		referenced[t.DevicePath] = true
+		referenced[strings.ToLower(t.DevicePath)] = true
 		if t.ArtID != "" {
 			arts[t.ArtID] = true
 		}
@@ -409,7 +409,7 @@ func (a *applier) cleanup(st *state.State, p *plan.Plan, prog Progress, rep *Rep
 	}
 	var remove []string
 	for _, f := range files {
-		if !referenced[f] {
+		if !referenced[strings.ToLower(f)] {
 			remove = append(remove, filepath.Join(a.d.Mount, filepath.FromSlash(f)))
 			if unmanaged[f] {
 				rep.Unmanaged++

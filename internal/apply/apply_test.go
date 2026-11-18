@@ -689,3 +689,44 @@ func TestRecoverRewritesPendingDB(t *testing.T) {
 		t.Fatalf("second recover %v %v", ok, err)
 	}
 }
+
+func TestApplyCleanupMatchesDevicePathsCaseInsensitively(t *testing.T) {
+	e := newEnv(t)
+	e.flac(t, "one.flac", "One", 440, false)
+	e.sync(t, 1)
+	st := e.state(t)
+	tr := st.Tracks["one.flac"]
+	real := tr.DevicePath
+	tr.DevicePath = strings.Replace(real, "/Music/F", "/Music/f", 1)
+	if err := state.Save(e.mount, st); err != nil {
+		t.Fatal(err)
+	}
+	e.flac(t, "two.flac", "Two", 550, false)
+	rep, _ := e.sync(t, 1)
+	if rep.Uploaded != 1 || rep.AudioUpdated != 0 || rep.Unmanaged != 0 {
+		t.Fatalf("report %+v", rep)
+	}
+	if !e.exists(t, real) {
+		t.Fatalf("%s removed", real)
+	}
+}
+
+func TestApplyRestoresMissingDeviceFile(t *testing.T) {
+	e := newEnv(t)
+	e.flac(t, "one.flac", "One", 440, false)
+	e.sync(t, 1)
+	before := e.state(t).Tracks["one.flac"]
+	e.flac(t, "two.flac", "Two", 550, false)
+	e.sync(t, 1)
+	if err := os.Remove(filepath.Join(e.mount, filepath.FromSlash(before.DevicePath))); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := e.sync(t, 1)
+	if rep.AudioUpdated != 1 || rep.Uploaded != 0 {
+		t.Fatalf("report %+v", rep)
+	}
+	after := e.state(t).Tracks["one.flac"]
+	if after.DBID != before.DBID || after.DateAdded != before.DateAdded || !e.exists(t, after.DevicePath) {
+		t.Fatalf("before %+v after %+v", before, after)
+	}
+}
