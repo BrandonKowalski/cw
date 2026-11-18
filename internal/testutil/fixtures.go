@@ -43,9 +43,12 @@ func MakeFLAC(t *testing.T, dir, name string, opts FLACOpts) string {
 			t.Fatal(err)
 		}
 		if err := png.Encode(f, img); err != nil {
+			f.Close()
 			t.Fatal(err)
 		}
-		f.Close()
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
 		args = append(args, "-i", cover, "-map", "0:a", "-map", "1", "-disposition:v", "attached_pic", "-metadata:s:v", "comment=Cover (front)")
 	}
 	if opts.Bits == 24 {
