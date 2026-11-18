@@ -27,8 +27,11 @@ type Progress interface {
 	Phase(name string, total int)
 	Step(label string)
 	Fail(label string, err error)
+	Note(msg string)
 	Done()
 }
+
+const finishing = "Finishing the database write, do not unplug the iPod."
 
 type Options struct {
 	Jobs    int
@@ -121,6 +124,16 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 		a.discard(done)
 		return rep, err
 	}
+	noted := make(chan struct{})
+	stopNote := context.AfterFunc(ctx, func() {
+		defer close(noted)
+		prog.Note(finishing)
+	})
+	defer func() {
+		if !stopNote() {
+			<-noted
+		}
+	}()
 
 	prog.Phase("updating", len(done)+len(tagItems)+len(p.Deletes))
 	used := make(map[uint64]bool, len(st.Tracks))

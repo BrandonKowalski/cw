@@ -24,17 +24,29 @@ import (
 )
 
 type recorder struct {
-	mu     sync.Mutex
-	phases []string
-	steps  []string
-	fails  []string
-	done   int
+	mu      sync.Mutex
+	phases  []string
+	steps   []string
+	fails   []string
+	notes   []string
+	done    int
+	onPhase func(string)
 }
 
 func (r *recorder) Phase(name string, total int) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.phases = append(r.phases, name)
+	hook := r.onPhase
+	r.mu.Unlock()
+	if hook != nil {
+		hook(name)
+	}
+}
+
+func (r *recorder) Note(msg string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.notes = append(r.notes, msg)
 }
 
 func (r *recorder) Step(label string) {
@@ -898,5 +910,31 @@ func TestApplyDeviceLossAborts(t *testing.T) {
 	}
 	if len(rep.Failures) != 0 || len(rec.fails) != 0 || rep.Uploaded != 0 {
 		t.Fatalf("report %+v fails %v", rep, rec.fails)
+	}
+}
+
+func TestApplyInterruptAfterTranscodeFinishesWithNotice(t *testing.T) {
+	e := newEnv(t)
+	e.flac(t, "one.flac", "One", 440, false)
+	d, st, p := e.build(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rec := &recorder{onPhase: func(name string) {
+		if name == "updating" {
+			cancel()
+		}
+	}}
+	rep, err := apply.Apply(ctx, d, st, p, e.lib, apply.Options{Jobs: 1, TempDir: e.tmp, Now: func() time.Time { return e.now }}, rec)
+	if err != nil || rep.Uploaded != 1 {
+		t.Fatalf("err %v report %+v", err, rep)
+	}
+	rec.mu.Lock()
+	notes := append([]string(nil), rec.notes...)
+	rec.mu.Unlock()
+	if len(notes) != 1 || notes[0] != "Finishing the database write, do not unplug the iPod." {
+		t.Fatalf("notes %v", notes)
+	}
+	if len(e.state(t).Tracks) != 1 || len(e.db(t)) != 1 {
+		t.Fatal("sync did not finish")
 	}
 }

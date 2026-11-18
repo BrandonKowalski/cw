@@ -125,6 +125,23 @@ func TestProgressPlain(t *testing.T) {
 	}
 }
 
+func TestProgressNote(t *testing.T) {
+	var b bytes.Buffer
+	p := ui.NewProgress(&b, false)
+	p.Note("hold on")
+	if b.String() != "hold on\n" {
+		t.Fatalf("%q", b.String())
+	}
+	b.Reset()
+	p = ui.NewProgress(&b, true)
+	p.Phase("updating", 2)
+	p.Note("hold on")
+	want := "\r\x1b[2Kupdating  0/2\r\x1b[2Khold on\n\r\x1b[2Kupdating  0/2"
+	if b.String() != want {
+		t.Fatalf("%q", b.String())
+	}
+}
+
 func TestProgressTTY(t *testing.T) {
 	var b bytes.Buffer
 	p := ui.NewProgress(&b, true)

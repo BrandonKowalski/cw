@@ -56,6 +56,18 @@ func (p *progress) Fail(label string, err error) {
 	}
 }
 
+func (p *progress) Note(msg string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.tty && p.active {
+		fmt.Fprint(p.w, "\r\x1b[2K")
+	}
+	fmt.Fprintln(p.w, msg)
+	if p.tty && p.active {
+		p.draw("")
+	}
+}
+
 func (p *progress) Done() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
