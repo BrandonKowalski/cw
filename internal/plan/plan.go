@@ -87,6 +87,11 @@ func Build(in Input) *Plan {
 	entries := append([]library.Entry(nil), in.Entries...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].RelPath < entries[j].RelPath })
 
+	onDevice := make(map[string]bool, len(in.DeviceFiles))
+	for _, f := range in.DeviceFiles {
+		onDevice[strings.ToLower(f)] = true
+	}
+
 	inLibrary := make(map[string]bool, len(entries))
 	tagsByPath := map[string]library.Tags{}
 	kept := 0
@@ -94,10 +99,12 @@ func Build(in Input) *Plan {
 	for _, e := range entries {
 		inLibrary[e.RelPath] = true
 		old := tracks[e.RelPath]
+		missing := false
 		if old != nil {
 			kept++
 			tagsByPath[e.RelPath] = old.Tags
-			if !NeedsLoad(old, e, in.EncodeVersion) {
+			missing = len(onDevice) > 0 && !onDevice[strings.ToLower(old.DevicePath)]
+			if !missing && !NeedsLoad(old, e, in.EncodeVersion) {
 				continue
 			}
 		}
@@ -115,6 +122,9 @@ func Build(in Input) *Plan {
 			p.Items = append(p.Items, Item{Kind: Upload, Track: tr})
 			p.BytesIn += EstimateBytes(e.Size)
 			kept++
+		case missing:
+			p.Items = append(p.Items, Item{Kind: AudioUpdate, Track: tr})
+			p.BytesIn += EstimateBytes(e.Size)
 		case old.AudioFP != tr.AudioFP || old.EncodeVersion != in.EncodeVersion:
 			p.Items = append(p.Items, Item{Kind: AudioUpdate, Track: tr})
 			p.BytesIn += EstimateBytes(e.Size)
@@ -141,15 +151,18 @@ func Build(in Input) *Plan {
 			p.Deletes = append(p.Deletes, Delete{RelPath: k, Track: tracks[k]})
 			p.BytesFreed += tracks[k].FileSize
 		}
+		if len(p.Deletes)*2 > len(tracks) {
+			p.Warnings = append(p.Warnings, fmt.Sprintf("about to delete %d of %d tracks on the iPod", len(p.Deletes), len(tracks)))
+		}
 	}
 	p.TrackCountAfter = kept
 
 	referenced := make(map[string]bool, len(tracks))
 	for _, t := range tracks {
-		referenced[t.DevicePath] = true
+		referenced[strings.ToLower(t.DevicePath)] = true
 	}
 	for _, f := range in.DeviceFiles {
-		if referenced[f] || strings.HasPrefix(path.Base(f), ".") {
+		if referenced[strings.ToLower(f)] || strings.HasPrefix(path.Base(f), ".") {
 			continue
 		}
 		p.Unmanaged = append(p.Unmanaged, f)

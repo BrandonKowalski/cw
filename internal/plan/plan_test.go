@@ -305,3 +305,75 @@ func TestBuildNilTrackIsFailure(t *testing.T) {
 		t.Errorf("failures=%v items=%v", p.Failures, p.Items)
 	}
 }
+
+func TestBuildMissingDeviceFileForcesAudioUpdate(t *testing.T) {
+	e := entry("a", 10, t0)
+	eb := entry("b", 10, t0)
+	gone := st("a", e, "t", "x")
+	gone.DevicePath = "iPod_Control/Music/F01/GONE.m4a"
+	gone.FileSize = 500
+	keep := st("b", eb, "t", "y")
+	s := newState(map[string]*state.Track{"a": gone, "b": keep})
+	l := &loader{tracks: map[string]*library.Track{"a": track(e, "t", "x", 1, 1)}}
+	p := Build(Input{Entries: []library.Entry{e, eb}, State: s, DeviceFiles: []string{keep.DevicePath}, Free: 1 << 40, Threshold: 20000, EncodeVersion: "alac-1", Load: l.load})
+	if len(p.Items) != 1 || p.Items[0].Kind != AudioUpdate || p.Items[0].Track.Entry.RelPath != "a" {
+		t.Fatalf("items = %+v", p.Items)
+	}
+	if len(l.calls) != 1 || l.calls[0] != "a" {
+		t.Fatalf("loads = %v", l.calls)
+	}
+	if p.BytesIn != EstimateBytes(10) || p.BytesFreed != 0 {
+		t.Fatalf("bytes in %d freed %d", p.BytesIn, p.BytesFreed)
+	}
+	if len(p.Touched) != 0 || len(p.Unmanaged) != 0 {
+		t.Fatalf("touched %v unmanaged %v", p.Touched, p.Unmanaged)
+	}
+}
+
+func TestBuildEmptyDeviceFilesDoesNotForceLoad(t *testing.T) {
+	e := entry("a", 10, t0)
+	s := newState(map[string]*state.Track{"a": st("a", e, "t", "x")})
+	l := &loader{}
+	p := Build(Input{Entries: []library.Entry{e}, State: s, Free: 1 << 40, Threshold: 20000, EncodeVersion: "alac-1", Load: l.load})
+	if len(p.Items) != 0 || len(l.calls) != 0 || len(p.Failures) != 0 {
+		t.Fatalf("items %v loads %v failures %v", p.Items, l.calls, p.Failures)
+	}
+}
+
+func TestBuildDevicePathsMatchCaseInsensitively(t *testing.T) {
+	e := entry("a", 10, t0)
+	tr := st("a", e, "t", "x")
+	tr.DevicePath = "iPod_Control/Music/F36/ABCD.m4a"
+	s := newState(map[string]*state.Track{"a": tr})
+	l := &loader{}
+	p := Build(Input{Entries: []library.Entry{e}, State: s, DeviceFiles: []string{"iPod_Control/Music/f36/ABCD.m4a"}, Free: 1 << 40, Threshold: 20000, EncodeVersion: "alac-1", Load: l.load})
+	if len(p.Unmanaged) != 0 || len(p.Items) != 0 || len(l.calls) != 0 || len(p.Deletes) != 0 {
+		t.Fatalf("unmanaged %v items %v loads %v deletes %v", p.Unmanaged, p.Items, l.calls, p.Deletes)
+	}
+}
+
+func TestBuildMassDeleteWarning(t *testing.T) {
+	s := newState(map[string]*state.Track{})
+	for _, k := range []string{"a", "b", "c"} {
+		s.Tracks[k] = st(k, entry(k, 1, t0), "t", "x")
+	}
+	keep := entry("a", 1, t0)
+	p := Build(Input{Entries: []library.Entry{keep}, State: s, Free: 1 << 40, Threshold: 20000, EncodeVersion: "alac-1", Load: (&loader{}).load})
+	want := "about to delete 2 of 3 tracks on the iPod"
+	found := false
+	for _, w := range p.Warnings {
+		if w == want {
+			found = true
+		}
+	}
+	if !found || len(p.Blockers) != 0 {
+		t.Fatalf("warnings %v blockers %v", p.Warnings, p.Blockers)
+	}
+	s.Tracks["d"] = st("d", entry("d", 1, t0), "t", "x")
+	p = Build(Input{Entries: []library.Entry{keep, entry("d", 1, t0)}, State: s, Free: 1 << 40, Threshold: 20000, EncodeVersion: "alac-1", Load: (&loader{}).load})
+	for _, w := range p.Warnings {
+		if strings.HasPrefix(w, "about to delete") {
+			t.Fatalf("unexpected warning %q", w)
+		}
+	}
+}
