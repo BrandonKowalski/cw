@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -62,7 +63,7 @@ type Input struct {
 }
 
 func (p *Plan) Empty() bool {
-	return len(p.Items) == 0 && len(p.Deletes) == 0 && len(p.Unmanaged) == 0 && len(p.Touched) == 0
+	return len(p.Items) == 0 && len(p.Deletes) == 0 && len(p.Unmanaged) == 0 && len(p.Touched) == 0 && len(p.Blockers) == 0
 }
 
 func Build(in Input) *Plan {
@@ -90,6 +91,9 @@ func Build(in Input) *Plan {
 			}
 		}
 		tr, err := in.Load(e)
+		if err == nil && tr == nil {
+			err = errors.New("no track returned")
+		}
 		if err != nil {
 			p.Failures = append(p.Failures, Failure{RelPath: e.RelPath, Err: fmt.Errorf("load %s: %w", e.RelPath, err)})
 			continue
@@ -142,8 +146,8 @@ func Build(in Input) *Plan {
 	sort.Strings(p.Unmanaged)
 
 	p.FreeAfter = in.Free - p.BytesIn + p.BytesFreed
-	if p.FreeAfter < minFree {
-		need := p.BytesIn - p.BytesFreed + minFree
+	if p.BytesIn > 0 && in.Free-p.BytesIn < minFree {
+		need := p.BytesIn + minFree
 		p.Blockers = append(p.Blockers, fmt.Sprintf("not enough space on iPod: need %s, have %s", formatSize(need), formatSize(in.Free)))
 	}
 

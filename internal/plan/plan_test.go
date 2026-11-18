@@ -255,3 +255,54 @@ func TestEmpty(t *testing.T) {
 		t.Errorf("zero plan should be empty")
 	}
 }
+
+func TestBuildDeleteOnlyLowSpaceNoBlocker(t *testing.T) {
+	e := entry("a", 10, t0)
+	s := newState(map[string]*state.Track{"a": st("a", e, "t", "a"), "b": st("b", entry("b", 10, t0), "t", "a")})
+	p := Build(Input{Entries: []library.Entry{e}, State: s, Free: 10 << 20, Threshold: 20000, EncodeVersion: "alac-1", Load: (&loader{}).load})
+	if len(p.Deletes) != 1 || len(p.Blockers) != 0 {
+		t.Errorf("deletes=%v blockers=%v", p.Deletes, p.Blockers)
+	}
+}
+
+func TestBuildTagUpdateOnlyLowSpaceNoBlocker(t *testing.T) {
+	e := entry("a", 10, t0.Add(time.Hour))
+	s := newState(map[string]*state.Track{"a": st("a", entry("a", 10, t0), "t", "x")})
+	l := &loader{tracks: map[string]*library.Track{"a": track(e, "t2", "x", 1, 1)}}
+	p := Build(Input{Entries: []library.Entry{e}, State: s, Free: 10 << 20, Threshold: 20000, EncodeVersion: "alac-1", Load: l.load})
+	if len(p.Items) != 1 || p.Items[0].Kind != TagUpdate || len(p.Blockers) != 0 {
+		t.Errorf("items=%v blockers=%v", p.Items, p.Blockers)
+	}
+}
+
+func TestBuildSpaceBlockerMessage(t *testing.T) {
+	e := entry("a", 1000, t0)
+	l := &loader{tracks: map[string]*library.Track{"a": track(e, "t", "a", 1, 1)}}
+	p := Build(Input{Entries: []library.Entry{e}, State: newState(map[string]*state.Track{}), Free: 1000000, Threshold: 20000, EncodeVersion: "alac-1", Load: l.load})
+	want := "not enough space on iPod: need " + formatSize(1100+64<<20) + ", have 1.0 MB"
+	if len(p.Blockers) != 1 || p.Blockers[0] != want {
+		t.Errorf("blockers = %v, want %q", p.Blockers, want)
+	}
+}
+
+func TestBuildBlockedEmptyPlanIsNotEmpty(t *testing.T) {
+	s := newState(map[string]*state.Track{})
+	var files []string
+	for _, k := range []string{"a", "b"} {
+		s.Tracks[k] = st(k, entry(k, 1, t0), "t", "a")
+		files = append(files, s.Tracks[k].DevicePath)
+	}
+	p := Build(Input{State: s, DeviceFiles: files, Free: 1 << 40, Threshold: 20000, EncodeVersion: "alac-1", Load: (&loader{}).load})
+	if p.Empty() {
+		t.Errorf("blocked plan reported empty")
+	}
+}
+
+func TestBuildNilTrackIsFailure(t *testing.T) {
+	e := entry("a", 10, t0)
+	load := func(library.Entry) (*library.Track, error) { return nil, nil }
+	p := Build(Input{Entries: []library.Entry{e}, State: newState(map[string]*state.Track{}), Free: 1 << 40, Threshold: 20000, EncodeVersion: "alac-1", Load: load})
+	if len(p.Failures) != 1 || len(p.Items) != 0 {
+		t.Errorf("failures=%v items=%v", p.Failures, p.Items)
+	}
+}
