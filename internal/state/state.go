@@ -26,6 +26,7 @@ type Track struct {
 	FileSize      int64        `json:"file_size"`
 	DateAdded     int64        `json:"date_added"`
 	ArtID         string       `json:"art_id"`
+	ArtSize       uint32       `json:"art_size"`
 }
 
 type State struct {
