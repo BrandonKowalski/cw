@@ -2,14 +2,12 @@ module github.com/BrandonKowalski/cw
 
 go 1.26.4
 
-require github.com/BurntSushi/toml v1.6.0
-
-require golang.org/x/sys v0.50.0
-
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/muesli/termenv v0.16.0
 	golang.org/x/image v0.48.0
+	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.48.0
 )
 
