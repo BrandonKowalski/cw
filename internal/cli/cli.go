@@ -224,10 +224,6 @@ func runPlan(name string, args []string, stdin io.Reader, stdout, stderr io.Writ
 			return fail(stderr, err)
 		}
 	}
-	entries, err := library.Scan(lib)
-	if err != nil {
-		return fail(stderr, fmt.Errorf("scan library: %w", err))
-	}
 	st, err := state.Load(d.Mount)
 	if err != nil {
 		return fail(stderr, err)
@@ -244,6 +240,10 @@ func runPlan(name string, args []string, stdin io.Reader, stdout, stderr io.Writ
 		} else {
 			fmt.Fprintln(stdout, "Warning: the last sync was interrupted; run cw sync to repair it.")
 		}
+	}
+	entries, err := library.Scan(lib)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("scan library: %w", err))
 	}
 	files, err := d.MusicFiles()
 	if err != nil {

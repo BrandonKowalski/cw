@@ -256,3 +256,22 @@ func TestCLITouchedOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestCLISyncRecoversBeforeScanningLibrary(t *testing.T) {
+	e := setup(t, 0)
+	if err := state.Save(e.mount, &state.State{Version: 1, DBPending: true, Tracks: map[string]*state.Track{}}); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(e.lib, "gone")
+	code, out, errs := run(t, "", "sync", "-y", "--device", e.mount, "--library", missing)
+	if code != 1 || !strings.Contains(out, "Recovered an interrupted sync") || !strings.Contains(errs, "scan library") {
+		t.Fatal(code, out, errs)
+	}
+	st, err := state.Load(e.mount)
+	if err != nil || st.DBPending {
+		t.Fatal(err, st)
+	}
+	if _, err := os.Stat(filepath.Join(e.mount, "iPod_Control", "iTunes", "iTunesDB")); err != nil {
+		t.Fatal(err)
+	}
+}
