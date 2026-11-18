@@ -42,6 +42,7 @@ type Plan struct {
 	Deletes         []Delete
 	Unmanaged       []string
 	Touched         map[string]library.Entry
+	Loaded          map[string]*library.Track
 	Failures        []Failure
 	Warnings        []string
 	Blockers        []string
@@ -78,7 +79,7 @@ func (p *Plan) OnlyTouched() bool {
 }
 
 func Build(in Input) *Plan {
-	p := &Plan{Touched: map[string]library.Entry{}}
+	p := &Plan{Touched: map[string]library.Entry{}, Loaded: map[string]*library.Track{}}
 	tracks := map[string]*state.Track{}
 	if in.State != nil && in.State.Tracks != nil {
 		tracks = in.State.Tracks
@@ -117,6 +118,7 @@ func Build(in Input) *Plan {
 			continue
 		}
 		tagsByPath[e.RelPath] = tr.Tags
+		p.Loaded[e.RelPath] = tr
 		switch {
 		case old == nil:
 			p.Items = append(p.Items, Item{Kind: Upload, Track: tr})

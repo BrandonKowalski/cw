@@ -768,3 +768,112 @@ func TestApplyTouchedOnlyKeepsDatabase(t *testing.T) {
 		t.Fatalf("state %+v", saved)
 	}
 }
+
+func lockArt(t *testing.T, e *env) func() {
+	t.Helper()
+	dir := filepath.Join(e.mount, "iPod_Control", "cw", "art")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	unlock := func() { os.Chmod(dir, 0o755) }
+	t.Cleanup(unlock)
+	return unlock
+}
+
+func removeArt(t *testing.T, e *env, id string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(e.mount, "iPod_Control", "cw", "art", id+"-*"))
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("art files %v %v", matches, err)
+	}
+	for _, m := range matches {
+		if err := os.Remove(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestApplyArtWriteFailureOnUploadRetriesNextRun(t *testing.T) {
+	e := newEnv(t)
+	e.flac(t, "A/one.flac", "One", 440, true)
+	unlock := lockArt(t, e)
+	rep, _ := e.sync(t, 1)
+	if rep.Uploaded != 1 || !hasWarning(rep.Warnings, "no cover art for A/one.flac: ") {
+		t.Fatalf("report %+v", rep)
+	}
+	tr := e.state(t).Tracks["A/one.flac"]
+	if tr.TagFP != "" || tr.ArtID != "" {
+		t.Fatalf("state %+v", tr)
+	}
+	unlock()
+	rep, _ = e.sync(t, 1)
+	if rep.TagUpdated != 1 || len(rep.Warnings) != 0 {
+		t.Fatalf("report %+v", rep)
+	}
+	tr = e.state(t).Tracks["A/one.flac"]
+	if tr.TagFP == "" || tr.ArtID == "" {
+		t.Fatalf("state %+v", tr)
+	}
+	if tracks := e.db(t); len(tracks) != 1 || tracks[0].MHIILink == 0 {
+		t.Fatalf("db %+v", tracks)
+	}
+}
+
+func TestApplyArtWriteFailureOnTagUpdateKeepsPrevious(t *testing.T) {
+	e := newEnv(t)
+	e.flac(t, "A/one.flac", "One", 440, true)
+	e.sync(t, 1)
+	before := e.state(t).Tracks["A/one.flac"]
+	removeArt(t, e, before.ArtID)
+	e.flac(t, "A/one.flac", "One More", 440, true)
+	unlock := lockArt(t, e)
+	rep, _ := e.sync(t, 1)
+	if rep.TagUpdated != 1 || !hasWarning(rep.Warnings, "no cover art for A/one.flac: ") {
+		t.Fatalf("report %+v", rep)
+	}
+	mid := e.state(t).Tracks["A/one.flac"]
+	if mid.TagFP != before.TagFP || mid.ArtID != before.ArtID || mid.ArtSize != before.ArtSize || mid.SourceMTime != before.SourceMTime || mid.Tags.Title != "One More" {
+		t.Fatalf("before %+v after %+v", before, mid)
+	}
+	unlock()
+	rep, _ = e.sync(t, 1)
+	if rep.TagUpdated != 1 || len(rep.Warnings) != 0 {
+		t.Fatalf("report %+v", rep)
+	}
+	after := e.state(t).Tracks["A/one.flac"]
+	if after.TagFP == before.TagFP || after.ArtID == "" {
+		t.Fatalf("state %+v", after)
+	}
+	if tracks := e.db(t); len(tracks) != 1 || tracks[0].MHIILink == 0 {
+		t.Fatalf("db %+v", tracks)
+	}
+}
+
+func TestApplyRerendersMissingArtForLoadedTrack(t *testing.T) {
+	e := newEnv(t)
+	p := e.flac(t, "A/one.flac", "One", 440, true)
+	e.sync(t, 1)
+	tr := e.state(t).Tracks["A/one.flac"]
+	removeArt(t, e, tr.ArtID)
+	bump(t, p)
+	e.flac(t, "B/two.flac", "Two", 550, false)
+	rep, _ := e.sync(t, 1)
+	if rep.Uploaded != 1 || len(rep.Warnings) != 0 {
+		t.Fatalf("report %+v", rep)
+	}
+	if !e.exists(t, "iPod_Control/cw/art/"+tr.ArtID+"-1029.rgb") {
+		t.Fatal("art not re-rendered")
+	}
+	linked := 0
+	for _, dt := range e.db(t) {
+		if dt.MHIILink != 0 {
+			linked++
+		}
+	}
+	if linked != 1 {
+		t.Fatalf("linked %d", linked)
+	}
+}

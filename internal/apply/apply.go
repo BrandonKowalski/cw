@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -142,7 +143,14 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 			ArtID:         oc.artID,
 			ArtSize:       oc.artSize,
 		}
-		if old := st.Tracks[rel]; oc.item.Kind == plan.AudioUpdate && old != nil {
+		old := st.Tracks[rel]
+		if isCacheErr(oc.artWarn) {
+			nt.TagFP, nt.ArtID, nt.ArtSize, nt.SourceMTime = "", "", 0, 0
+			if old != nil {
+				nt.TagFP, nt.ArtID, nt.ArtSize = old.TagFP, old.ArtID, old.ArtSize
+			}
+		}
+		if oc.item.Kind == plan.AudioUpdate && old != nil {
 			nt.DBID = old.DBID
 			nt.DateAdded = old.DateAdded
 			rep.AudioUpdated++
@@ -170,11 +178,13 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 			rep.Warnings = append(rep.Warnings, artWarning(rel, artErr))
 		}
 		old.Tags = tr.Tags
-		old.TagFP = tr.TagFP
-		old.ArtID = id
-		old.ArtSize = size
-		old.SourceSize = tr.Entry.Size
-		old.SourceMTime = tr.Entry.ModTime.UnixNano()
+		if !isCacheErr(artErr) {
+			old.TagFP = tr.TagFP
+			old.ArtID = id
+			old.ArtSize = size
+			old.SourceSize = tr.Entry.Size
+			old.SourceMTime = tr.Entry.ModTime.UnixNano()
+		}
 		rep.TagUpdated++
 		prog.Step(rel)
 	}
@@ -199,6 +209,11 @@ func Apply(ctx context.Context, d *device.Device, st *state.State, p *plan.Plan,
 	missing, err := WriteDatabases(d, st)
 	if err != nil {
 		return rep, err
+	}
+	if a.rerender(st, p, missing) {
+		if missing, err = WriteDatabases(d, st); err != nil {
+			return rep, err
+		}
 	}
 	for _, rel := range missing {
 		rep.Warnings = append(rep.Warnings, "cover art cache missing for "+rel)
@@ -388,6 +403,19 @@ func (a *applier) ensureArt(cover []byte) (string, uint32, error) {
 	return id, uint32(len(cover)), nil
 }
 
+type cacheError struct {
+	err error
+}
+
+func (e *cacheError) Error() string { return e.err.Error() }
+
+func (e *cacheError) Unwrap() error { return e.err }
+
+func isCacheErr(err error) bool {
+	var c *cacheError
+	return errors.As(err, &c)
+}
+
 func (a *applier) renderArt(id string, cover []byte) error {
 	if _, err := loadThumbs(a.d.Mount, id); err == nil {
 		return nil
@@ -398,10 +426,24 @@ func (a *applier) renderArt(id string, cover []byte) error {
 			return err
 		}
 		if err := fsutil.WriteAtomic(artPath(a.d.Mount, id, f), b); err != nil {
-			return fmt.Errorf("cache cover art: %w", err)
+			return &cacheError{fmt.Errorf("cache cover art: %w", err)}
 		}
 	}
 	return nil
+}
+
+func (a *applier) rerender(st *state.State, p *plan.Plan, missing []string) bool {
+	rendered := false
+	for _, rel := range missing {
+		tr, t := p.Loaded[rel], st.Tracks[rel]
+		if tr == nil || t == nil || len(tr.Cover) == 0 || artwork.ID(tr.Cover) != t.ArtID {
+			continue
+		}
+		if a.renderArt(t.ArtID, tr.Cover) == nil {
+			rendered = true
+		}
+	}
+	return rendered
 }
 
 func (a *applier) cleanup(st *state.State, p *plan.Plan, prog Progress, rep *Report) error {
