@@ -84,6 +84,10 @@ func parse(name string, args []string, stderr io.Writer) (options, int, bool) {
 		}
 		return o, 2, false
 	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "unexpected argument: %s\n%s", fs.Arg(0), usage)
+		return o, 2, false
+	}
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "jobs" || f.Name == "j" {
 			o.jobsSet = true
@@ -144,8 +148,7 @@ type loaded struct {
 func prefetch(lib string, entries []library.Entry, st *state.State, jobs int) func(library.Entry) (*library.Track, error) {
 	var need []library.Entry
 	for _, e := range entries {
-		old := st.Tracks[e.RelPath]
-		if old == nil || old.SourceSize != e.Size || old.SourceMTime != e.ModTime.UnixNano() || old.EncodeVersion != transcode.Version {
+		if plan.NeedsLoad(st.Tracks[e.RelPath], e, transcode.Version) {
 			need = append(need, e)
 		}
 	}
@@ -255,9 +258,19 @@ func runPlan(name string, args []string, stdin io.Reader, stdout, stderr io.Writ
 		EncodeVersion: transcode.Version,
 		Load:          prefetch(lib, entries, st, jobs),
 	})
-	ui.RenderPlanFor(stdout, ui.PlanInfo{Mount: d.Mount, Library: lib, Threshold: cfg.TrackWarnThreshold, DirTotals: dirTotals(entries)}, p, o.verbose)
+	quiet := syncing && !o.dryRun && p.OnlyTouched()
+	if !quiet {
+		ui.RenderPlanFor(stdout, ui.PlanInfo{Mount: d.Mount, Library: lib, Threshold: cfg.TrackWarnThreshold, DirTotals: dirTotals(entries)}, p, o.verbose)
+	}
 	if !syncing || o.dryRun {
 		return 0
+	}
+	if quiet {
+		code := applyPlan(d, st, p, lib, jobs, io.Discard, stderr, true)
+		if code == 0 {
+			fmt.Fprintln(stdout, "Already in sync.")
+		}
+		return code
 	}
 	if len(p.Blockers) > 0 {
 		return 1
@@ -276,7 +289,7 @@ func runPlan(name string, args []string, stdin io.Reader, stdout, stderr io.Writ
 		}
 		fmt.Fprintln(stdout)
 	}
-	return applyPlan(d, st, p, lib, jobs, stdout, stderr)
+	return applyPlan(d, st, p, lib, jobs, stdout, stderr, false)
 }
 
 func confirm(stdin io.Reader) bool {
@@ -291,7 +304,7 @@ func confirm(stdin io.Reader) bool {
 	return false
 }
 
-func applyPlan(d *device.Device, st *state.State, p *plan.Plan, lib string, jobs int, stdout, stderr io.Writer) int {
+func applyPlan(d *device.Device, st *state.State, p *plan.Plan, lib string, jobs int, stdout, stderr io.Writer, quiet bool) int {
 	tmp, err := os.MkdirTemp("", "cw-")
 	if err != nil {
 		return fail(stderr, fmt.Errorf("create temp dir: %w", err))
@@ -300,14 +313,20 @@ func applyPlan(d *device.Device, st *state.State, p *plan.Plan, lib string, jobs
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	rep, err := apply.Apply(ctx, d, st, p, lib, apply.Options{Jobs: jobs, TempDir: tmp}, ui.NewProgress(stdout, isTTY(stdout)))
+	if quiet {
+		if err != nil {
+			return fail(stderr, err)
+		}
+		return 0
+	}
 	fmt.Fprintln(stdout)
+	if errors.Is(err, context.Canceled) {
+		ui.RenderInterrupted(stdout, rep)
+		return 1
+	}
 	ui.RenderReport(stdout, rep)
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			fmt.Fprintln(stderr, "interrupted")
-		} else {
-			fmt.Fprintf(stderr, "error: %v\n", err)
-		}
+		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 	if len(rep.Failures) > 0 {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -183,5 +184,75 @@ func TestCLIInfo(t *testing.T) {
 	code, out, errs := run(t, "", append([]string{"info"}, e.flags()...)...)
 	if code != 0 || !strings.Contains(out, e.mount) || !strings.Contains(out, "never") {
 		t.Fatal(code, out, errs)
+	}
+}
+
+func TestCLIDryRunDoesNotWrite(t *testing.T) {
+	e := setup(t, 2)
+	code, out, errs := run(t, "", append([]string{"sync", "--dry-run"}, e.flags()...)...)
+	if code != 0 || !strings.Contains(out, "upload") || strings.Contains(out, "Apply?") {
+		t.Fatal(code, out, errs)
+	}
+	if _, err := os.Stat(statePath(e)); !os.IsNotExist(err) {
+		t.Fatalf("state exists: %v", err)
+	}
+}
+
+func TestCLISyncRecoversPendingDB(t *testing.T) {
+	e := setup(t, 0)
+	if err := state.Save(e.mount, &state.State{Version: 1, DBPending: true, Tracks: map[string]*state.Track{}}); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := run(t, "", append([]string{"sync", "-y"}, e.flags()...)...)
+	if !strings.Contains(out, "Recovered an interrupted sync: rebuilt the iPod database.") {
+		t.Fatal(code, out, errs)
+	}
+	st, err := state.Load(e.mount)
+	if err != nil || st.DBPending {
+		t.Fatal(err, st)
+	}
+}
+
+func TestCLIUnexpectedArgument(t *testing.T) {
+	code, _, errs := run(t, "", "sync", "/some/path")
+	if code != 2 || !strings.Contains(errs, "unexpected argument: /some/path") {
+		t.Fatal(code, errs)
+	}
+}
+
+func TestCLITouchedOnly(t *testing.T) {
+	e := setup(t, 2)
+	if code, out, errs := run(t, "", append([]string{"sync", "-y"}, e.flags()...)...); code != 0 {
+		t.Fatal(code, out, errs)
+	}
+	later := time.Now().Add(time.Hour)
+	if err := filepath.WalkDir(e.lib, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			return os.Chtimes(p, later, later)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := run(t, "", append([]string{"diff"}, e.flags()...)...)
+	if code != 0 || out != "Already in sync.\n" {
+		t.Fatal(code, out, errs)
+	}
+	code, out, errs = run(t, "", append([]string{"sync"}, e.flags()...)...)
+	if code != 0 || out != "Already in sync.\n" {
+		t.Fatal(code, out, errs)
+	}
+	code, out, errs = run(t, "", append([]string{"diff"}, e.flags()...)...)
+	if code != 0 || out != "Already in sync.\n" {
+		t.Fatal(code, out, errs)
+	}
+	st, err := state.Load(e.mount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tr := range st.Tracks {
+		if tr.SourceMTime != later.UnixNano() {
+			t.Fatal(tr.SourceMTime, later.UnixNano())
+		}
 	}
 }

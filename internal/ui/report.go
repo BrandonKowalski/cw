@@ -56,3 +56,8 @@ func RenderInfo(w io.Writer, i Info) {
 		row("library", i.Library)
 	}
 }
+
+func RenderInterrupted(w io.Writer, r apply.Report) {
+	fmt.Fprintf(w, "Interrupted after %s. %d uploaded, %d updated, %d deleted, %d unmanaged removed.\n",
+		FormatDuration(r.Elapsed), r.Uploaded, r.AudioUpdated+r.TagUpdated, r.Deleted, r.Unmanaged)
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strings"
 
 	"github.com/BrandonKowalski/cw/internal/library"
 	"github.com/BrandonKowalski/cw/internal/plan"
@@ -26,7 +27,7 @@ func RenderPlan(w io.Writer, p *plan.Plan, verbose bool) {
 }
 
 func RenderPlanFor(w io.Writer, info PlanInfo, p *plan.Plan, verbose bool) {
-	if p.Empty() && len(p.Failures) == 0 {
+	if (p.Empty() || p.OnlyTouched()) && len(p.Failures) == 0 {
 		fmt.Fprintln(w, green("Already in sync."))
 		return
 	}
@@ -55,10 +56,10 @@ func RenderPlanFor(w io.Writer, info PlanInfo, p *plan.Plan, verbose bool) {
 		switch it.Kind {
 		case plan.Upload:
 			uploads = append(uploads, r)
-			uploadBytes += it.Track.Entry.Size * 11 / 10
+			uploadBytes += plan.EstimateBytes(it.Track.Entry.Size)
 		case plan.AudioUpdate:
 			audio = append(audio, r)
-			audioBytes += it.Track.Entry.Size * 11 / 10
+			audioBytes += plan.EstimateBytes(it.Track.Entry.Size)
 		case plan.TagUpdate:
 			tags = append(tags, r)
 		}
@@ -110,6 +111,9 @@ func sizeNote(n int64, count int) string {
 }
 
 func summary(w io.Writer, label string, n int, unit, note string) {
+	if n == 1 {
+		unit = strings.TrimSuffix(unit, "s")
+	}
 	line := fmt.Sprintf("  %-14s%5s %s", label, FormatCount(n), unit)
 	if note != "" {
 		line += "   " + note

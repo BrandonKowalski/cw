@@ -103,7 +103,7 @@ func TestRenderPlanUnmanagedOnlyVerbose(t *testing.T) {
 	p := &plan.Plan{Unmanaged: []string{"iPod_Control/Music/F00/AAAA.m4a"}}
 	var b bytes.Buffer
 	ui.RenderPlan(&b, p, false)
-	if strings.Contains(b.String(), "AAAA.m4a") || !strings.Contains(b.String(), "not managed       1 files") {
+	if strings.Contains(b.String(), "AAAA.m4a") || !strings.Contains(b.String(), "not managed       1 file") {
 		t.Fatal(b.String())
 	}
 	b.Reset()
@@ -160,5 +160,22 @@ func TestRenderInfo(t *testing.T) {
 		if !strings.Contains(b.String(), want) {
 			t.Fatalf("missing %q in:\n%s", want, b.String())
 		}
+	}
+}
+
+func TestRenderPlanSingular(t *testing.T) {
+	p := &plan.Plan{Items: []plan.Item{upload("A/B/01.flac")}, Unmanaged: []string{"x"}}
+	var b bytes.Buffer
+	ui.RenderPlan(&b, p, false)
+	if !strings.Contains(b.String(), "1 track ") && !strings.Contains(b.String(), "1 track\n") || !strings.Contains(b.String(), "1 file") || strings.Contains(b.String(), "1 files") {
+		t.Fatal(b.String())
+	}
+}
+
+func TestRenderInterrupted(t *testing.T) {
+	var b bytes.Buffer
+	ui.RenderInterrupted(&b, apply.Report{Uploaded: 3, Elapsed: 5 * time.Second})
+	if b.String() != "Interrupted after 5s. 3 uploaded, 0 updated, 0 deleted, 0 unmanaged removed.\n" {
+		t.Fatal(b.String())
 	}
 }

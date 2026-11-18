@@ -66,6 +66,18 @@ func (p *Plan) Empty() bool {
 	return len(p.Items) == 0 && len(p.Deletes) == 0 && len(p.Unmanaged) == 0 && len(p.Touched) == 0 && len(p.Blockers) == 0
 }
 
+func EstimateBytes(size int64) int64 {
+	return size * 11 / 10
+}
+
+func NeedsLoad(old *state.Track, e library.Entry, encodeVersion string) bool {
+	return old == nil || old.SourceSize != e.Size || old.SourceMTime != e.ModTime.UnixNano() || old.EncodeVersion != encodeVersion
+}
+
+func (p *Plan) OnlyTouched() bool {
+	return len(p.Touched) > 0 && len(p.Items) == 0 && len(p.Deletes) == 0 && len(p.Unmanaged) == 0 && len(p.Blockers) == 0 && len(p.Failures) == 0
+}
+
 func Build(in Input) *Plan {
 	p := &Plan{Touched: map[string]library.Entry{}}
 	tracks := map[string]*state.Track{}
@@ -86,7 +98,7 @@ func Build(in Input) *Plan {
 		if old != nil {
 			kept++
 			tagsByPath[e.RelPath] = old.Tags
-			if old.SourceSize == e.Size && old.SourceMTime == e.ModTime.UnixNano() && old.EncodeVersion == in.EncodeVersion {
+			if !NeedsLoad(old, e, in.EncodeVersion) {
 				continue
 			}
 		}
@@ -102,11 +114,11 @@ func Build(in Input) *Plan {
 		switch {
 		case old == nil:
 			p.Items = append(p.Items, Item{Kind: Upload, Track: tr})
-			p.BytesIn += e.Size * 11 / 10
+			p.BytesIn += EstimateBytes(e.Size)
 			kept++
 		case old.AudioFP != tr.AudioFP || old.EncodeVersion != in.EncodeVersion:
 			p.Items = append(p.Items, Item{Kind: AudioUpdate, Track: tr})
-			p.BytesIn += e.Size * 11 / 10
+			p.BytesIn += EstimateBytes(e.Size)
 			p.BytesFreed += old.FileSize
 		case old.TagFP != tr.TagFP:
 			p.Items = append(p.Items, Item{Kind: TagUpdate, Track: tr})
